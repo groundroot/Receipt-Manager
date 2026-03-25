@@ -1,0 +1,1383 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>영수증매니저</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --dark:#0f1523;--dark2:#1a2235;--dark3:#263046;--dark4:#344060;
+  --accent:#f59e0b;--accent2:#fbbf24;--white:#fff;--gray:#8898aa;
+  --green:#4ade80;--red:#f87171;
+  --font:-apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  --mono:"SF Mono","Consolas","Menlo",monospace;
+}
+body{font-family:var(--font);background:var(--dark);color:var(--white);height:100vh;display:flex;flex-direction:column;font-size:13px;overflow:hidden}
+
+/* HEADER */
+header{background:var(--dark);height:48px;padding:0 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--accent);flex-shrink:0}
+.hdr-logo{width:28px;height:28px;background:var(--accent);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.hdr-title{color:var(--white);font-size:14px;font-weight:700}
+.hdr-sub{color:var(--gray);font-size:10px}
+.hdr-badge{margin-left:auto;background:var(--dark3);color:var(--gray);font-size:9px;font-family:var(--mono);padding:2px 9px;border-radius:20px;border:1px solid var(--dark4)}
+
+
+
+/* LAYOUT */
+.workspace{display:grid;grid-template-columns:320px 1fr;flex:1;overflow:hidden}
+.controls{background:var(--dark2);display:flex;flex-direction:column;overflow-y:auto;border-right:1px solid var(--dark3)}
+.ctrl-scroll{padding:14px 14px 20px;display:flex;flex-direction:column;gap:12px}
+
+/* SECTIONS */
+.sec{background:var(--dark3);border-radius:8px;padding:12px;border:1px solid var(--dark4)}
+.sec-hd{color:var(--accent);font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:5px}
+.sec-hd::before{content:'';width:3px;height:11px;background:var(--accent);border-radius:2px}
+
+/* UPLOAD */
+input[type=file]{display:none}
+.upload-zone{border:2px dashed var(--dark4);border-radius:7px;padding:28px 10px;text-align:center;cursor:pointer;transition:all .2s;user-select:none}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:rgba(245,158,11,.05)}
+.upload-zone strong{color:var(--white);font-size:15px;display:block;margin-bottom:5px;font-weight:700}
+.upload-zone p{color:var(--gray);font-size:11px;line-height:1.6}
+.upload-ico{font-size:36px;display:block;margin-bottom:8px}
+
+/* RECEIPT LIST */
+.receipt-list{display:flex;flex-direction:column;gap:7px;margin-top:8px}
+.receipt-item{background:var(--dark2);border:1px solid var(--dark4);border-radius:6px;padding:8px;display:flex;gap:8px;align-items:flex-start;position:relative;transition:border-color .3s}
+.receipt-item.ai-loading{border-color:rgba(245,158,11,.4)}
+.receipt-item.ai-ok{border-color:rgba(74,222,128,.25)}
+.receipt-thumb{width:44px;height:56px;object-fit:cover;border-radius:4px;flex-shrink:0;background:var(--dark3);cursor:pointer}
+.receipt-info{flex:1;min-width:0}
+.receipt-name{color:var(--white);font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.receipt-amt-row{display:flex;gap:5px;align-items:center}
+.receipt-amt{flex:1;background:var(--dark);border:1px solid var(--dark4);border-radius:4px;padding:5px 7px;color:var(--white);font-family:var(--mono);font-size:12px;font-weight:700;outline:none;transition:border-color .2s}
+.receipt-amt:focus{border-color:var(--accent)}
+.receipt-amt.detected{border-color:rgba(74,222,128,.4);color:#86efac}
+.ai-mini{font-size:9px;padding:2px 6px;border-radius:10px;border:1px solid var(--dark4);color:var(--gray);background:var(--dark3);white-space:nowrap;transition:all .3s;cursor:default}
+.ai-mini.ok{color:var(--green);border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.07)}
+.ai-mini.err{color:var(--red);border-color:rgba(248,113,113,.35);cursor:pointer}
+.ai-mini.err:hover{background:rgba(248,113,113,.1)}
+.ai-mini.loading{color:var(--accent);border-color:rgba(245,158,11,.35);animation:fadePulse 1.2s ease-in-out infinite}
+.reocr-btn{font-size:10px;padding:2px 8px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);background:rgba(245,158,11,.08);cursor:pointer;white-space:nowrap;transition:all .2s}
+.reocr-btn:hover{background:rgba(245,158,11,.2);transform:scale(1.05)}
+@keyframes fadePulse{0%,100%{opacity:.4}50%{opacity:1}}
+.del-btn{position:absolute;top:5px;right:5px;width:18px;height:18px;background:var(--dark4);border:none;border-radius:3px;color:var(--gray);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.del-btn:hover{background:var(--red);color:var(--white)}
+.retry-btn{font-size:9px;color:var(--accent);cursor:pointer;text-decoration:underline;margin-top:3px;display:none}
+
+/* Per-receipt purpose */
+.rec-meta{margin-top:6px;border-top:1px solid var(--dark3);padding-top:6px;display:flex;flex-direction:column;gap:4px}
+.rec-meta-toggle{font-size:9px;color:var(--gray);cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px}
+.rec-meta-toggle:hover{color:var(--accent)}
+.rec-meta-toggle .arrow{display:inline-block;transition:transform .2s;font-size:8px}
+.rec-meta-toggle.open .arrow{transform:rotate(90deg)}
+.rec-meta-body{display:none;flex-direction:column;gap:4px}
+.rec-meta-body.open{display:flex}
+.rec-sel{width:100%;background:var(--dark);border:1px solid var(--dark4);border-radius:4px;padding:4px 7px;color:var(--white);font-size:10px;font-family:var(--font);outline:none;transition:border-color .2s}
+.rec-sel:focus{border-color:var(--accent)}
+.rec-sel option{background:var(--dark2)}
+.rec-custom{width:100%;background:var(--dark);border:1px solid var(--dark4);border-radius:4px;padding:4px 7px;color:var(--white);font-size:10px;font-family:var(--font);outline:none;transition:border-color .2s}
+.rec-custom:focus{border-color:var(--accent)}
+.rec-custom::placeholder{color:var(--dark4)}
+.rec-purpose-badge{display:inline-flex;align-items:center;font-size:9px;color:var(--accent);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:1px 7px;margin-top:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* TOTAL */
+.total-badge{background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3);border-radius:6px;padding:10px 12px;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
+.total-label{color:var(--gray);font-size:10px}
+.total-val{color:#4ade80;font-family:var(--mono);font-size:18px;font-weight:700}
+
+/* FORM */
+.field{margin-bottom:9px}.field:last-child{margin-bottom:0}
+label{display:block;color:var(--gray);font-size:9px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;margin-bottom:4px}
+select,input[type=text],textarea{width:100%;background:var(--dark2);border:1px solid var(--dark4);border-radius:5px;padding:8px 10px;color:var(--white);font-size:12px;font-family:var(--font);outline:none;transition:border-color .2s;line-height:1.4}
+select:focus,input[type=text]:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--dark2)}
+textarea{resize:vertical;min-height:50px}
+input[type=text]::placeholder,textarea::placeholder{color:var(--dark4)}
+
+/* LAYOUT PICKER */
+.layout-picks{display:flex;gap:6px;margin-top:6px}
+.lp-btn{flex:1;background:var(--dark2);border:1px solid var(--dark4);border-radius:5px;color:var(--gray);font-size:11px;font-weight:700;padding:8px 4px;cursor:pointer;font-family:var(--font);transition:all .15s;text-align:center}
+.lp-btn:hover{border-color:var(--accent);color:var(--accent)}
+.lp-btn.active{background:rgba(245,158,11,.15);border-color:var(--accent);color:var(--accent)}
+
+/* SLIDER */
+.slider-row{display:flex;align-items:center;gap:8px}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;background:var(--dark2);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;background:var(--accent);border-radius:50%;cursor:pointer;box-shadow:0 0 0 3px rgba(245,158,11,.2)}
+.sv{color:var(--accent);font-family:var(--mono);font-size:12px;min-width:34px;text-align:right}
+
+/* TOGGLE */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid var(--dark2);margin-top:8px}
+.tn{color:var(--white);font-size:11px;font-weight:500}.td{color:var(--gray);font-size:9px;margin-top:1px}
+.tog{width:34px;height:19px;background:var(--dark2);border-radius:10px;position:relative;cursor:pointer;transition:background .2s;border:1px solid var(--dark4)}
+.tog.on{background:var(--accent);border-color:var(--accent)}
+.tog::after{content:'';position:absolute;width:13px;height:13px;background:var(--white);border-radius:50%;top:2px;left:2px;transition:transform .2s}
+.tog.on::after{transform:translateX(15px)}
+
+/* BUTTONS */
+.btn{width:100%;padding:10px;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:7px}
+.btn:last-child{margin-bottom:0}
+.btn-pdf{background:var(--accent);color:var(--dark)}
+.btn-pdf:hover:not(:disabled){background:var(--accent2)}
+.btn-jpg{background:var(--dark2);color:var(--white);border:1px solid var(--dark4)}
+.btn-jpg:hover:not(:disabled){background:var(--dark4)}
+.btn-print{background:var(--dark2);color:var(--white);border:1px solid #4a6fa5}
+.btn-print:hover:not(:disabled){background:#1e3a5f}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* PREVIEW */
+.preview-panel{background:#b8c2cc;display:flex;flex-direction:column;align-items:center;padding:32px 32px 40px;overflow-y:auto;gap:20px;
+  background-image:repeating-linear-gradient(0deg,transparent,transparent 30px,rgba(0,0,0,.05) 30px,rgba(0,0,0,.05) 31px),
+  repeating-linear-gradient(90deg,transparent,transparent 30px,rgba(0,0,0,.05) 30px,rgba(0,0,0,.05) 31px)}
+.page-wrap{position:relative;width:calc(792px * var(--zoom, 0.5));height:calc(1120px * var(--zoom, 0.5));flex-shrink:0;background:white;box-shadow:0 0 0 1px rgba(0,0,0,.1),0 8px 32px rgba(0,0,0,.3)}
+.page-wrap canvas{width:100%;height:100%;display:block}
+.page-num{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:9px;font-family:var(--mono);color:rgba(0,0,0,.4);white-space:nowrap}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;color:#777}
+.empty-ico{font-size:120px;opacity:.5}
+.empty-txt{font-size:26px;text-align:center;opacity:.8;line-height:2;font-weight:700;color:#555}
+
+/* STATUS */
+.statusbar{background:var(--dark);border-top:1px solid var(--dark3);padding:4px 18px;display:flex;gap:18px;align-items:center;flex-shrink:0;font-size:9px;font-family:var(--mono);color:var(--gray)}
+.sb{display:flex;gap:3px}.sb span{color:var(--accent)}
+.sb-ok{color:var(--green)!important}.sb-err{color:var(--red)!important}
+.sbdot{width:5px;height:5px;background:var(--gray);border-radius:50%;margin:auto 0}
+.sbdot.ok{background:var(--green)}
+
+/* MODAL */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:none;align-items:center;justify-content:center}
+.modal.open{display:flex}
+/* MOBILE */
+@media(max-width: 800px) {
+  body { height: auto; overflow-y: auto; }
+  .workspace { display: flex; flex-direction: column; overflow: visible; }
+  .controls { border-bottom: 2px solid var(--dark3); border-right: none; }
+  .preview-panel { padding: 20px 10px; min-height: 50vh; overflow: visible; }
+  header { padding: 0 14px; height: 50px; }
+  .hdr-badge { font-size: 10px !important; padding: 4px 6px !important; }
+  .zoom-wrap { top: 60px !important; right: 10px !important; padding: 6px 12px !important; }
+  .zoom-wrap span { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr-logo">📄</div>
+  <span class="hdr-title">영수증매니저</span>
+  <span class="hdr-sub">Receipt Manager <span style="margin-left:8px; font-family:var(--mono); color:var(--accent); font-size:10px;">v1.1.8</span></span>
+  <button class="hdr-badge" style="cursor:pointer; background:var(--accent); color:var(--dark); font-weight:bold; border:none;" onclick="window.open('mailto:christvictory@gmail.com?subject=영수증매니저 개선 피드백&body=앱 기능 향상을 위한 피드백을 적어주세요.')">💡 앱 기능 향상 피드백</button>
+</header>
+
+
+
+<div class="workspace">
+<div class="controls"><div class="ctrl-scroll">
+
+
+
+  <!-- ① Upload -->
+  <div class="sec">
+    <div class="sec-hd">① 영수증 업로드</div>
+    <div class="upload-zone" id="uploadZone">
+      <span class="upload-ico">🧾</span>
+      <strong>영수증을 드래그하여 파일 업로드</strong>
+      <p>JPG · PNG · WEBP · <b style="color:var(--accent)">PDF</b> 지원 · 다중 가능</p>
+    </div>
+    <div class="receipt-list" id="receiptList"></div>
+    <div class="total-badge" id="totalBadge" style="display:none">
+      <span class="total-label">📊 인식된 총 합계</span>
+      <span class="total-val" id="totalVal">0원</span>
+    </div>
+  </div>
+
+  <!-- ② Info -->
+  <div class="sec">
+    <div class="sec-hd">② 영수증 정보 입력</div>
+    <div class="field">
+      <label>구매 목적 · 지출 항목</label>
+      <select id="purposeSel" onchange="onPurposeSel()">
+        <option value="">-- 선택하세요 --</option>
+        <option>사무용품 구매</option>
+        <option>식대 / 회식비</option>
+        <option>교통비 / 주차비</option>
+        <option>우편 / 택배비</option>
+        <option>청소 / 위생용품 구매</option>
+        <option>비품 / 장비 구매</option>
+        <option>인쇄 / 복사비</option>
+        <option>교육 / 연수비</option>
+        <option>행사 / 홍보비</option>
+        <option>수선 / 유지보수</option>
+        <option>복리후생비</option>
+        <option value="__custom__">기타 (직접 입력)</option>
+      </select>
+    </div>
+    <div class="field" id="customField" style="display:none">
+      <label>직접 입력</label>
+      <input type="text" id="purposeCustom" placeholder="구매 목적을 직접 입력하세요">
+    </div>
+    <div class="field">
+      <label>구매자</label>
+      <input type="text" id="buyerInput" placeholder="예) 홍길동 간사">
+    </div>
+    <div class="field">
+      <label>꼬리말 · 비고</label>
+      <textarea id="footerNote" rows="2" placeholder="예) 본 증빙은 실제 지출 내역을 기반으로 작성되었으며, 원본 영수증을 첨부합니다.">본 증빙은 실제 지출 내역을 기반으로 작성되었으며, 원본 영수증을 첨부합니다.</textarea>
+    </div>
+  </div>
+
+  <!-- ③ Layout -->
+  <div class="sec">
+    <div class="sec-hd">③ 레이아웃 설정</div>
+    <div class="field">
+      <label>페이지당 영수증 수</label>
+      <div class="layout-picks">
+        <button class="lp-btn active" data-n="1" onclick="setLayout(1)">1개</button>
+        <button class="lp-btn" data-n="2" onclick="setLayout(2)">2개</button>
+        <button class="lp-btn" data-n="3" onclick="setLayout(3)">3개</button>
+        <button class="lp-btn" data-n="4" onclick="setLayout(4)">4개</button>
+      </div>
+    </div>
+    <div class="field" style="margin-top:8px">
+      <label>영수증 크기 비율</label>
+      <div class="slider-row">
+        <input type="range" id="sizeSlider" min="30" max="98" value="82">
+        <span class="sv" id="sliderVal">82%</span>
+      </div>
+    </div>
+    <div class="toggle-row">
+      <div><div class="tn">여백 자동 제거</div><div class="td">이미지 흰 여백 크롭</div></div>
+      <div class="tog on" id="cropTog" onclick="toggleCrop()"></div>
+    </div>
+  </div>
+
+  <!-- ④ Export -->
+  <div class="sec">
+    <div class="sec-hd">④ 내보내기 및 관리</div>
+    <div style="display:flex; gap:6px; margin-bottom:12px;">
+      <button class="btn btn-pdf" onclick="sortReceiptsByDate()" style="flex:1; background:var(--accent); color:var(--dark);">📅 날짜순 자동 정렬</button>
+    </div>
+    <button class="btn btn-pdf" id="btnPDF" disabled onclick="exportPDF()">📑 PDF로 저장 (전체 페이지)</button>
+    <button class="btn btn-jpg" id="btnJPG" disabled onclick="exportJPG()">🖼 JPG로 저장 (1페이지)</button>
+    <button class="btn btn-print" id="btnPrint" disabled onclick="printPages()">🖨️ 인쇄 (전체 페이지)</button>
+  </div>
+
+</div></div>
+
+<!-- PREVIEW -->
+<div class="preview-panel" id="previewPanel">
+  <div class="zoom-wrap" style="position:fixed; top:65px; right:30px; background:var(--dark2); border:1px solid var(--dark4); padding:8px 14px; border-radius:30px; display:flex; align-items:center; gap:10px; z-index:50; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
+    <button onclick="fitZoom()" style="background:var(--dark4); color:var(--white); border:none; padding:4px 10px; border-radius:12px; font-size:10px; cursor:pointer; font-weight:bold; transition:all 0.2s;" onmouseover="this.style.background='var(--accent)'; this.style.color='var(--dark)';" onmouseout="this.style.background='var(--dark4)'; this.style.color='var(--white)';">자동 맞춤</button>
+    <input type="range" id="zoomSliderUI" min="10" max="150" value="50" oninput="applyZoom(this.value)" style="width:100px; -webkit-appearance:none; appearance:none; height:4px; background:var(--dark); border-radius:2px; outline:none;">
+    <span id="zoomValUI" style="font-size:11px; font-family:var(--mono); color:var(--white); width:35px; text-align:right;">50%</span>
+  </div>
+  <div class="empty-state" id="emptyState">
+    <div class="empty-ico">📋</div>
+    <div class="empty-txt">영수증을 업로드하면<br>A4 미리보기가 표시됩니다</div>
+  </div>
+</div>
+</div>
+
+<div class="statusbar">
+  <div class="sbdot" id="sbDot"></div>
+  <div class="sb">상태: <span id="sbStatus">대기 중</span></div>
+  <div class="sb">영수증: <span id="sbCount">0</span>장</div>
+  <div class="sb">페이지: <span id="sbPages">0</span>p</div>
+  <div class="sb">레이아웃: <span id="sbLayout">1개/p</span></div>
+  <div class="sb">합계: <span id="sbTotal">-</span></div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*,application/pdf" multiple>
+<div class="modal" id="imgModal" onclick="closeModal()"><img class="modal-img" id="modalImg" src="" alt=""></div>
+
+<script>
+// PDF.js 초기화 — CDN 로드 실패해도 나머지 기능은 정상 동작
+try {
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+} catch(e) { console.warn('PDF.js 로드 실패, PDF 업로드 비활성화:', e); }
+
+// ── State ──
+let receipts  = [];
+let perPage   = 1;
+let sizeRatio = 82;
+let autoCrop  = true;
+let idCnt     = 0;
+
+// ── DOM shortcuts ──
+const $  = id => document.getElementById(id);
+const fileInput    = $('fileInput');
+const uploadZone   = $('uploadZone');
+const receiptList  = $('receiptList');
+const totalBadge   = $('totalBadge');
+const totalVal     = $('totalVal');
+const purposeSel   = $('purposeSel');
+const customField  = $('customField');
+const purposeCustom= $('purposeCustom');
+const buyerInput   = $('buyerInput');
+const sizeSlider   = $('sizeSlider');
+const sliderVal    = $('sliderVal');
+const cropTog      = $('cropTog');
+const btnPDF       = $('btnPDF');
+const btnJPG       = $('btnJPG');
+const previewPanel = $('previewPanel');
+const emptyState   = $('emptyState');
+const sbDot        = $('sbDot');
+const sbStatus     = $('sbStatus');
+const sbCount      = $('sbCount');
+const sbPages      = $('sbPages');
+const sbLayout     = $('sbLayout');
+const sbTotal      = $('sbTotal');
+
+// ── Events ──
+uploadZone.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', e=>{ handleFiles([...e.target.files]); fileInput.value=''; });
+uploadZone.addEventListener('dragover', e=>{ e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', ()=>uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e=>{ e.preventDefault(); uploadZone.classList.remove('drag-over'); handleFiles([...e.dataTransfer.files]); });
+// 미리보기 영역 전체에서도 드래그앤드롭 지원
+previewPanel.addEventListener('dragover', e=>{ e.preventDefault(); previewPanel.style.outline='3px dashed var(--accent)'; previewPanel.style.outlineOffset='-10px'; });
+previewPanel.addEventListener('dragleave', ()=>{ previewPanel.style.outline='none'; });
+previewPanel.addEventListener('drop', e=>{ e.preventDefault(); previewPanel.style.outline='none'; handleFiles([...e.dataTransfer.files]); });
+purposeSel.addEventListener('change', ()=>{ onPurposeSel(); drawAllPages(); });
+purposeCustom.addEventListener('input', drawAllPages);
+buyerInput.addEventListener('input', drawAllPages);
+$('footerNote').addEventListener('input', drawAllPages);
+sizeSlider.addEventListener('input', ()=>{ sizeRatio=+sizeSlider.value; sliderVal.textContent=sizeRatio+'%'; drawAllPages(); });
+
+function onPurposeSel(){ customField.style.display = purposeSel.value==='__custom__'?'block':'none'; }
+function setLayout(n){ perPage=n; document.querySelectorAll('.lp-btn').forEach(b=>b.classList.toggle('active',+b.dataset.n===n)); sbLayout.textContent=n+'개/p'; drawAllPages(); }
+function toggleCrop(){ autoCrop=!autoCrop; cropTog.classList.toggle('on',autoCrop); receipts.forEach(r=>{ r.croppedCanvas=autoCrop?doCrop(r.canvas):r.canvas; }); drawAllPages(); }
+
+// ── File Loading ──
+// Remote Camera Integration (PC/Mac 브라우저인 경우 SSE 리스너 연결)
+if (window.innerWidth > 800 && window.location.protocol !== 'file:') {
+  setTimeout(() => {
+    try {
+      const evtSource = new EventSource('/events');
+      evtSource.onmessage = function(event) {
+        if(event.data === 'connected') { console.log('Phone link active'); return; }
+
+        const base64Img = event.data;
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width=img.width; c.height=img.height;
+          c.getContext('2d').drawImage(img,0,0);
+          addReceipt(c, "Smartphone_Camera_" + new Date().getTime() + ".jpg", base64Img);
+        };
+        img.src = base64Img;
+      };
+      evtSource.onerror = () => { evtSource.close(); };
+    } catch(e) { /* 서버 미실행 시 무시 */ }
+  }, 1000);
+}
+
+async function handleFiles(files) {
+  for (const f of files) {
+    if (f.type==='application/pdf') await loadPDF(f);
+    else if (f.type.startsWith('image/')) await loadImage(f);
+  }
+}
+
+function loadImage(file) {
+  return new Promise(res => {
+    const reader = new FileReader();
+    reader.onload = evt => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width=img.width; c.height=img.height;
+        c.getContext('2d').drawImage(img,0,0);
+        addReceipt(c, file.name, evt.target.result);
+        res();
+      };
+      img.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadPDF(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    alert('PDF.js 라이브러리가 로드되지 않았습니다.\n이미지 파일(JPG/PNG)로 업로드해 주세요.');
+    return;
+  }
+  const ab = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: ab}).promise;
+  for (let i=1; i<=pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const vp = page.getViewport({scale:2.5});
+    const c = document.createElement('canvas');
+    c.width=vp.width; c.height=vp.height;
+    await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    const dataUrl = c.toDataURL('image/jpeg', 0.95);
+    addReceipt(c, `${file.name}${pdf.numPages>1?' (p.'+i+')':''}`, dataUrl, {pdfPage: i, pdfTotal: pdf.numPages});
+  }
+}
+
+function addReceipt(canvas, filename, dataUrl, pdfInfo) {
+  const id = ++idCnt;
+  const cropped = autoCrop ? doCrop(canvas) : canvas;
+  const rec = {id, canvas, croppedCanvas:cropped, origDataUrl:dataUrl, amount:'', amountNum:0, filename, aiStatus:'loading', purpose:'', purposeCustom:''};
+  if (pdfInfo) { rec.pdfPage = pdfInfo.pdfPage; rec.pdfTotal = pdfInfo.pdfTotal; }
+  receipts.push(rec);
+  renderReceiptItem(rec);
+  updateTotal();
+  updateStatusBar();
+  drawAllPages();
+  extractAmountFor(rec);
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function renderReceiptItem(rec) {
+  emptyState.style.display='none';
+  const div = document.createElement('div');
+  div.className='receipt-item';
+  div.id=`ritem_${rec.id}`;
+  const safeName = escHtml(rec.filename);
+  div.innerHTML=`
+    <img class="receipt-thumb" src="${rec.origDataUrl}" onclick="openModal('${rec.id}')" title="클릭하여 크게 보기">
+    <div class="receipt-info">
+      <div class="receipt-name" title="${safeName}">${safeName}</div>
+      <div class="receipt-amt-row">
+        <input class="receipt-amt" type="text" id="amt_${rec.id}" placeholder="금액 직접 입력" data-id="${rec.id}" oninput="onAmtEdit(this)">
+        <span class="ai-mini" id="pill_${rec.id}">수동</span>
+        <button class="reocr-btn" onclick="reOCR(${rec.id})" title="금액 재인식">🔄 인식</button>
+      </div>
+      <div class="rec-meta">
+        <div class="rec-meta-toggle" id="metaToggle_${rec.id}" onclick="toggleMeta(${rec.id})">
+          <span class="arrow">▶</span> 용도·카테고리 <span style="color:var(--dark4)">(선택)</span>
+        </div>
+        <div class="rec-meta-body" id="metaBody_${rec.id}">
+          <select class="rec-sel" id="recSel_${rec.id}" onchange="onRecPurpose(${rec.id})">
+            <option value="">-- 전체 설정 따름 --</option>
+            <option>사무용품 구매</option>
+            <option>식대 / 회식비</option>
+            <option>교통비 / 주차비</option>
+            <option>우편 / 택배비</option>
+            <option>청소 / 위생용품 구매</option>
+            <option>비품 / 장비 구매</option>
+            <option>인쇄 / 복사비</option>
+            <option>교육 / 연수비</option>
+            <option>행사 / 홍보비</option>
+            <option>수선 / 유지보수</option>
+            <option>복리후생비</option>
+            <option value="__custom__">기타 (직접 입력)</option>
+          </select>
+          <input class="rec-custom" type="text" id="recCustom_${rec.id}" placeholder="직접 입력" style="display:none" oninput="onRecCustom(${rec.id})">
+          <span class="rec-purpose-badge" id="recBadge_${rec.id}" style="display:none"></span>
+        </div>
+      </div>
+    </div>
+    <button class="del-btn" onclick="deleteReceipt(${rec.id})">✕</button>`;
+  receiptList.appendChild(div);
+}
+
+function deleteReceipt(id) {
+  receipts = receipts.filter(r=>r.id!==id);
+  const el=$(`ritem_${id}`); if(el) el.remove();
+  updateTotal(); updateStatusBar(); drawAllPages();
+  if(receipts.length===0) emptyState.style.display='flex';
+}
+
+function onAmtEdit(input) {
+  const id=+input.dataset.id;
+  const rec=receipts.find(r=>r.id===id); if(!rec) return;
+  rec.amount=input.value.trim();
+  rec.amountNum=parseAmt(rec.amount);
+  const pill=$(`pill_${id}`);
+  if(pill){ pill.className='ai-mini ok'; pill.textContent='수동'; }
+  updateTotal(); drawAllPages();
+}
+
+function toggleMeta(id) {
+  const toggle = $(`metaToggle_${id}`);
+  const body   = $(`metaBody_${id}`);
+  toggle.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function onRecPurpose(id) {
+  const rec = receipts.find(r=>r.id===id); if(!rec) return;
+  const sel    = $(`recSel_${id}`);
+  const custom = $(`recCustom_${id}`);
+  const badge  = $(`recBadge_${id}`);
+  const v = sel.value;
+  rec.purpose = v;
+  rec.purposeCustom = '';
+  custom.style.display = v==='__custom__' ? 'block' : 'none';
+  updateBadge(rec, badge);
+  drawAllPages();
+}
+
+function onRecCustom(id) {
+  const rec = receipts.find(r=>r.id===id); if(!rec) return;
+  rec.purposeCustom = $(`recCustom_${id}`).value.trim();
+  updateBadge(rec, $(`recBadge_${id}`));
+  drawAllPages();
+}
+
+function updateBadge(rec, badge) {
+  if (!badge) return;
+  const label = getRecPurpose(rec);
+  if (label) { badge.textContent = '📌 ' + label; badge.style.display='inline-flex'; }
+  else { badge.style.display='none'; }
+}
+
+function getRecPurpose(rec) {
+  if (!rec.purpose) return '';
+  if (rec.purpose === '__custom__') return rec.purposeCustom || '';
+  return rec.purpose;
+}
+
+
+function retryAI(id) {
+  const pill=$(`pill_${id}`); if(!pill) return;
+  if(!pill.classList.contains('err')) return;
+  const rec=receipts.find(r=>r.id===id); if(!rec) return;
+  const item=$(`ritem_${id}`); if(item) item.className='receipt-item ai-loading';
+  pill.className='ai-mini loading'; pill.textContent='재시도';
+  extractAmountFor(rec);
+}
+
+function reOCR(id) {
+  const rec=receipts.find(r=>r.id===id); if(!rec) return;
+  const pill=$(`pill_${id}`);
+  const item=$(`ritem_${id}`);
+  if(item) item.className='receipt-item ai-loading';
+  if(pill){ pill.className='ai-mini loading'; pill.textContent='인식 중...'; }
+  // skipAmount 해제 (재인식 시에는 항상 금액 추출)
+  rec.pdfPage = rec.pdfTotal || 1;
+  rec.pdfTotal = rec.pdfTotal || 1;
+  extractAmountFor(rec);
+}
+
+// ── Amount: OCR 추출 ──
+function sortReceiptsByDate() {
+  receipts.sort((a,b) => {
+    const da = (a.date && a.date !== '미상') ? a.date : '9999-12-31';
+    const db = (b.date && b.date !== '미상') ? b.date : '9999-12-31';
+    return da.localeCompare(db);
+  });
+  const rl = document.getElementById('receiptList');
+  receipts.forEach(r => {
+    const item = document.getElementById(`ritem_${r.id}`);
+    if(item) rl.appendChild(item);
+  });
+  drawAllPages();
+}
+
+async function extractAmountFor(rec) {
+  setAmountResult(rec, null, 'OCR 분석 중...');
+  try {
+    if (typeof Tesseract === 'undefined') throw new Error('Tesseract 로드 실패');
+    const ocrCanvas = preprocessForOCR(rec.canvas);
+    const worker = await Tesseract.createWorker('kor+eng');
+    await worker.setParameters({
+      tessedit_pageseg_mode: '6',
+      preserve_interword_spaces: '1',
+    });
+    const ret = await worker.recognize(ocrCanvas);
+    const text = ret.data.text;
+    const ocrLines = ret.data.lines || [];  // Tesseract 라인별 바운딩박스 데이터
+    const ocrWords = ret.data.words || [];  // Tesseract 단어별 바운딩박스 데이터
+    await worker.terminate();
+
+    console.log("================================");
+    console.log("[Tesseract OCR Text]");
+    console.log(text);
+    console.log("[Tesseract Lines]", ocrLines.length, "lines,", ocrWords.length, "words");
+    console.log("================================");
+
+    let amount = null, date = '미상', itemType = '기타', title = '내역 알 수 없음', category = '기타';
+
+    // PDF가 여러 페이지일 경우, 마지막 페이지만 금액 인식
+    const skipAmount = rec.pdfTotal && rec.pdfTotal > 1 && rec.pdfPage !== rec.pdfTotal;
+
+    const dateMatch = text.match(/\b(20[12]\d)[-./년\s]*([01]?\d)[-./월\s]*([0-3]?\d)[일\s]*\b/);
+    if(dateMatch) date = `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`;
+
+    // ═══════════════════════════════════════════════
+    // 네이버 클로바 OCR 스타일 — 2D 공간 기반 금액 추출 v4
+    // ═══════════════════════════════════════════════
+    // 원칙: ① 바운딩박스 좌표로 영수증 영역 분할 (상단/중간/하단)
+    //       ② 오른쪽 정렬된 숫자 = 금액 후보
+    //       ③ 키워드-숫자 2D 근접도 스코어링
+    //       ④ 하단 영역 + 고우선 키워드 근처 = 최고 점수
+
+    // ── 1. 단어별 구조화 데이터 구축 ──
+    const imgW = ocrCanvas.width, imgH = ocrCanvas.height;
+    const wordData = [];  // {text, x, y, x2, y2, centerX, centerY, isNum, numVal, isKw, kwPriority}
+
+    const highKw = /^(합계|총액|결제금?액?|청구금?액?|총합|합산|받을금액|총결제|승인금?액?|거래금?액?|판매금?액?|일시불|total|grand|amount|balance)$/i;
+    const lowKw = /^(카드결제|신용승인|소계|수납|매출|payment|charge|subtotal|net|gross|due)$/i;
+    const wonKw = /원|₩|KRW/i;
+    const dollarRe = /(?:US\s*\$|USD|\$)\s*(\d{1,3}(?:[,.]\d{1,3})*(?:\.\d{1,2})?)|(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:\$|USD)/i;
+    const numRe = /^[\d,.\s]+$/;
+
+    // Tesseract words에서 바운딩박스 데이터 추출
+    for (const w of ocrWords) {
+      if (!w.text || !w.text.trim()) continue;
+      const bb = w.bbox;
+      const txt = w.text.trim();
+      const entry = {
+        text: txt,
+        x: bb.x0, y: bb.y0, x2: bb.x1, y2: bb.y1,
+        centerX: (bb.x0 + bb.x1) / 2,
+        centerY: (bb.y0 + bb.y1) / 2,
+        isNum: false, numVal: 0,
+        isKw: false, kwPriority: 0
+      };
+      // 숫자 판별: 콤마/마침표 포함 숫자 (금액 후보)
+      const cleaned = txt.replace(/[,.\s원₩]/g, '');
+      if (/^\d+$/.test(cleaned) && cleaned.length > 0) {
+        entry.isNum = true;
+        entry.numVal = parseInt(cleaned, 10);
+      }
+      // 키워드 판별 (자간 오류 보정: 공백 제거 후 매칭)
+      const noSpace = txt.replace(/\s/g, '');
+      if (highKw.test(noSpace)) { entry.isKw = true; entry.kwPriority = 3; }
+      else if (lowKw.test(noSpace)) { entry.isKw = true; entry.kwPriority = 2; }
+      else if (wonKw.test(txt)) { entry.isKw = true; entry.kwPriority = 1; }
+      wordData.push(entry);
+    }
+
+    console.log("[CLOVA식] 단어 수:", wordData.length, "숫자:", wordData.filter(w=>w.isNum).length, "키워드:", wordData.filter(w=>w.isKw).length);
+
+    // ── 2. 라인별 구조화 (Tesseract 라인 바운딩박스 활용) ──
+    const lineData = [];
+    for (const ln of ocrLines) {
+      const bb = ln.bbox;
+      const txt = ln.text.trim();
+      if (!txt) continue;
+      lineData.push({
+        text: txt,
+        y: bb.y0, y2: bb.y1,
+        centerY: (bb.y0 + bb.y1) / 2,
+        // 이 라인의 단어들
+        words: ln.words ? ln.words.map(w => {
+          const cleaned = w.text.trim().replace(/[,.\s원₩]/g, '');
+          return { text: w.text.trim(), x: w.bbox.x0, x2: w.bbox.x1, y: w.bbox.y0,
+                   isNum: /^\d+$/.test(cleaned) && cleaned.length > 0,
+                   numVal: /^\d+$/.test(cleaned) ? parseInt(cleaned, 10) : 0 };
+        }) : []
+      });
+    }
+
+    // ── 3. 영수증 영역 분할 (상단 20% / 중간 / 하단 40%) ──
+    const bottomThreshold = imgH * 0.6;  // 하단 40% 시작점
+    const topThreshold = imgH * 0.2;     // 상단 20%
+    // 오른쪽 열 기준 (전체 너비의 50% 이상 = 오른쪽)
+    const rightThreshold = imgW * 0.45;
+
+    // ── 4. 달러($) 파이프라인: 원본 텍스트에서 추출 ──
+    let isDollar = false;
+    let dollarAmount = 0;
+    const origLines = text.split(/\n/);
+    for (let li = origLines.length - 1; li >= 0; li--) {
+      const dm = origLines[li].match(dollarRe);
+      if (dm) {
+        dollarAmount = parseFloat((dm[1] || dm[2]).replace(/,/g, ''));
+        if (dollarAmount > 0) { isDollar = true; break; }
+      }
+    }
+
+    // ── 5. 2D 공간 기반 스코어링 (네이버 SPADE 방식 근사) ──
+    // 각 숫자 단어에 점수 부여:
+    //   - 같은 라인의 키워드 근접도: 고우선 +100, 저우선 +60, 원 +40
+    //   - 하단 영역 위치: +30 (영수증 하단 = 합계 영역)
+    //   - 오른쪽 정렬: +20 (금액은 우측 정렬)
+    //   - 콤마 포맷 숫자 (1,000 형태): +15
+    //   - 금액 크기 합리성 (100~5천만): +10
+    //   - 더 아래에 위치할수록 보너스: + (y위치/전체높이) * 20
+
+    let candidates = [];  // {val, score, source, lineText}
+
+    for (let li = 0; li < lineData.length; li++) {
+      const ld = lineData[li];
+      const lineText = ld.text;
+
+      // 비금액 패턴 제거 (날짜, 전화번호 등)
+      if (/20\d{2}[-./년]\s*\d{1,2}[-./월]/.test(lineText)) continue;
+      if (/\d{2,3}[-.]?\d{3,4}[-.]?\d{4}/.test(lineText) && !highKw.test(lineText.replace(/\s/g,''))) continue;
+
+      // 이 라인에서 키워드 찾기
+      const noSpaceLine = lineText.replace(/\s/g, '');
+      let lineKwPriority = 0;
+      if (highKw.test(noSpaceLine)) lineKwPriority = 3;
+      else if (lowKw.test(noSpaceLine)) lineKwPriority = 2;
+      else if (wonKw.test(lineText)) lineKwPriority = 1;
+
+      // 라인의 텍스트에서 숫자 추출 (safeText 변환 적용)
+      let safeLine = lineText;
+      // 달러 패턴 제거
+      safeLine = safeLine.replace(/(?:US\s*\$|USD|\$)\s*\d+(?:[,.]\d+)*/gi, ' ');
+      // 자간 교정
+      safeLine = safeLine.replace(/(\d)\s*[,.]\s*(?=\d)/g, '$1,');
+      safeLine = safeLine.replace(/(\d) {1,3}(?=\d)/g, '$1');
+      // 8자리 이상 제거
+      safeLine = safeLine.replace(/\b\d{8,}\b/g, ' ');
+
+      const numMatches = [...safeLine.matchAll(/(\d{1,3}(?:[,.]\d{3})+|\d+)/g)];
+
+      for (const nm of numMatches) {
+        const val = parseInt(nm[1].replace(/[,.]/g, ''), 10);
+        if (val <= 10 || val > 50000000) continue;
+
+        let score = 0;
+
+        // 키워드 근접도 (같은 라인)
+        if (lineKwPriority === 3) score += 100;
+        else if (lineKwPriority === 2) score += 60;
+        else if (lineKwPriority === 1) score += 40;
+
+        // 인접 라인 키워드 체크 (위 1줄, 아래 1줄)
+        if (lineKwPriority === 0) {
+          for (let adj = -1; adj <= 1; adj += 2) {
+            const adjIdx = li + adj;
+            if (adjIdx >= 0 && adjIdx < lineData.length) {
+              const adjLine = lineData[adjIdx].text.replace(/\s/g, '');
+              if (highKw.test(adjLine)) { score += 70; break; }
+              else if (lowKw.test(adjLine)) { score += 40; break; }
+            }
+          }
+        }
+
+        // 하단 영역 보너스
+        if (ld.centerY > bottomThreshold) score += 30;
+
+        // y위치 보너스 (아래쪽일수록 높은 점수)
+        score += (ld.centerY / imgH) * 20;
+
+        // 오른쪽 정렬 보너스
+        const numX = nm.index / safeLine.length * imgW;  // 근사 x위치
+        if (ld.words && ld.words.length > 0) {
+          // 바운딩박스 기반 정확한 위치 사용
+          const rightmostNum = ld.words.filter(w => w.isNum).sort((a,b) => b.x - a.x)[0];
+          if (rightmostNum && rightmostNum.x > rightThreshold) score += 20;
+        } else if (nm.index > safeLine.length * 0.4) {
+          score += 20;
+        }
+
+        // 콤마 포맷 보너스 (1,000 형태 = 진짜 금액일 확률 높음)
+        if (/\d{1,3}([,.]\d{3})+/.test(nm[1])) score += 15;
+
+        // 금액 크기 합리성
+        if (val >= 100 && val <= 50000000) score += 10;
+
+        candidates.push({ val, score, source: lineKwPriority > 0 ? 'keyword' : 'spatial', lineText: lineText.substring(0, 40) });
+      }
+    }
+
+    // 점수 내림차순 정렬
+    candidates.sort((a, b) => b.score - a.score);
+
+    // 상위 5개 후보 로깅
+    console.log("[CLOVA식] 금액 후보 TOP5:");
+    candidates.slice(0, 5).forEach((c, i) => {
+      console.log(`  ${i+1}. ${c.val.toLocaleString()} (score:${c.score.toFixed(1)}, ${c.source}) "${c.lineText}"`);
+    });
+
+    // ── 6. 텍스트 기반 폴백 (바운딩박스 데이터 없을 때) ──
+    if (candidates.length === 0) {
+      // v3 방식 텍스트 폴백
+      let safeText = text;
+      safeText = safeText.replace(/(?:US\s*\$|USD|\$)\s*\d+(?:[,.]\d+)*/gi, ' ');
+      safeText = safeText.replace(/(\d)\s*[,.]\s*(?=\d)/g, '$1,');
+      safeText = safeText.replace(/(\d) {1,3}(?=\d)/g, '$1');
+      safeText = safeText.replace(/\b20\d{2}\s*[-./년]\s*\d{1,2}\s*[-./월]\s*\d{1,2}[일]?\b/g, ' ');
+      safeText = safeText.replace(/\b\d{2}:\d{2}(:\d{2})?\b/g, ' ');
+      safeText = safeText.replace(/\b\d{2,3}[-.]\d{3,4}[-.]\d{4}\b/g, ' ');
+      safeText = safeText.replace(/\b\d{8,}\b/g, ' ');
+      const fLines = safeText.split(/\n/);
+      const fHighKw = /(?:합\s*계|총\s*액|결\s*제\s*금?\s*액?|청\s*구\s*금?\s*액?|총\s*결\s*제|승\s*인\s*금?\s*액?|total|grand|balance)/i;
+      for (let li = fLines.length - 1; li >= 0; li--) {
+        if (fHighKw.test(fLines[li])) {
+          const nums = fLines[li].match(/\d{1,3}([,.]\d{3})+|\d+/g);
+          if (nums) {
+            for (const n of nums) {
+              const v = parseInt(n.replace(/[,.]/g,''), 10);
+              if (v > 10 && v <= 50000000) candidates.push({ val: v, score: 50, source: 'textFallback', lineText: fLines[li].substring(0,40) });
+            }
+          }
+        }
+      }
+      // 최대값 폴백
+      if (candidates.length === 0) {
+        const allNums = safeText.match(/\b\d{1,3}([,.]\d{3})+\b|\b\d+\b/g);
+        if (allNums) {
+          for (const n of allNums) {
+            const v = parseInt(n.replace(/[,.]/g,''), 10);
+            if (v > 10 && v <= 50000000) candidates.push({ val: v, score: 1, source: 'maxFallback', lineText: '' });
+          }
+        }
+      }
+      candidates.sort((a, b) => b.score - a.score || b.val - a.val);
+      console.log("[CLOVA식] 텍스트 폴백 후보:", candidates.slice(0,3).map(c=>`${c.val}(${c.score})`).join(', '));
+    }
+
+    // ── 7. 최종 금액 결정 ──
+    const bestCandidate = candidates[0];
+
+    if (skipAmount) {
+      // PDF 마지막 페이지가 아니면 건너뛰기
+    } else if (isDollar && dollarAmount > 0) {
+      // 달러: KRW 키워드 금액이 1000 이상이고 달러가 10 미만이면 원화 우선
+      const topKRW = bestCandidate ? bestCandidate.val : 0;
+      if (topKRW > 1000 && dollarAmount < 10) {
+        amount = fmtAmt(topKRW);
+      } else {
+        amount = '$' + Math.round(dollarAmount);
+      }
+    } else if (bestCandidate && bestCandidate.val > 0) {
+      amount = fmtAmt(bestCandidate.val);
+    }
+    console.log("[CLOVA식] 최종 amount:", amount, isDollar ? "(달러감지)" : "");
+
+    if(text.match(/커피|카페|식당|음식|푸드|식사|주점|베이커리|버거/)) { itemType = "서비스"; title = "식음료"; category = "식대 / 회식비"; }
+    else if(text.match(/마트|편의점|다이소|씨유|씨에스|GS25|세븐/i)) { itemType = "상품"; title = "소매점 구매"; category = "비품 / 장비 구매"; }
+    else if(text.match(/택시|버스|기차|주차|코레일|KTX|SRT/i)) { itemType = "서비스"; title = "여객/주차"; category = "교통비 / 주차비"; }
+    else if(text.match(/문구|사무|용품|알파/)) { itemType = "제품"; title = "소모품"; category = "사무용품 구매"; }
+    
+    rec.date = date; rec.itemType = itemType; rec.title = title;
+    
+    if (category !== "기타") {
+      rec.purpose = category;
+      const sel = $('recSel_' + rec.id);
+      if (sel) {
+        let matched = false;
+        for (let i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].text === category || sel.options[i].value === category) { sel.value = sel.options[i].value; matched = true; break; }
+        }
+        if(!matched) { sel.value = '__custom__'; const custom = $('recCustom_' + rec.id); if(custom) { custom.style.display='block'; custom.value=category; rec.purposeCustom=category; } }
+      }
+      updateBadge(rec, $('recBadge_' + rec.id));
+    }
+    
+    const nameDiv = document.querySelector(`#ritem_${rec.id} .receipt-name`);
+    if(nameDiv) nameDiv.innerHTML = `<span style="color:var(--accent);font-size:10px;">[${rec.itemType}]</span> ${rec.date!=='미상'?rec.date+' | ':''}${rec.title}`;
+    
+    setAmountResult(rec, amount ? amount.toString() : null, amount ? null : '금액 재확인(OCR)');
+  } catch(e) { console.error(e); setAmountResult(rec, null, 'OCR 오류'); }
+}
+
+function setAmountResult(rec, amount, errMsg) {
+  const item  = document.getElementById(`ritem_${rec.id}`);
+  const input = document.getElementById(`amt_${rec.id}`);
+  const pill  = document.getElementById(`pill_${rec.id}`);
+
+  if (amount) {
+    rec.amount    = amount;
+    rec.amountNum = parseAmt(amount);
+    if (input) { input.value=amount; input.classList.add('detected'); }
+    if (pill)  { pill.className='ai-mini ok'; pill.textContent='AI ✓'; }
+    if (item)  { item.className='receipt-item ai-ok'; }
+  } else {
+    if (input) { input.placeholder=errMsg||'직접 입력'; }
+    if (pill)  { pill.className='ai-mini err'; pill.textContent=errMsg||'미인식'; pill.title='클릭하여 재시도'; }
+    if (item)  { item.className='receipt-item'; }
+  }
+  updateTotal();
+  drawAllPages();
+}
+
+// ── Total ──
+function parseAmt(s) {
+  if (!s) return 0;
+  if (s.includes('$')) {
+    const m = s.replace(/[,$\sUSD]/gi,'').match(/[\d.]+/);
+    return m ? Math.round(parseFloat(m[0])) : 0;
+  }
+  const m = s.replace(/[,\s원₩]/g,'').match(/\d+/);
+  return m ? parseInt(m[0]) : 0;
+}
+function fmtAmt(n) { return n.toLocaleString('ko-KR')+'원'; }
+function fmtAmtAuto(s) { return s && s.includes('$') ? s : fmtAmt(parseAmt(s)); }
+
+function updateTotal() {
+  const hasDollar = receipts.some(r => r.amount && r.amount.includes('$'));
+  const krwReceipts = receipts.filter(r => !r.amount || !r.amount.includes('$'));
+  const usdReceipts = receipts.filter(r => r.amount && r.amount.includes('$'));
+  const krwTotal = krwReceipts.reduce((a,r)=>a+r.amountNum, 0);
+  const usdTotal = usdReceipts.reduce((a,r)=>a+r.amountNum, 0);
+  let totalStr = '';
+  if (krwTotal > 0) totalStr += fmtAmt(krwTotal);
+  if (usdTotal > 0) totalStr += (totalStr ? ' + ' : '') + '$' + usdTotal;
+  if (!totalStr) totalStr = '0원';
+  totalVal.textContent = totalStr;
+  totalBadge.style.display = receipts.length ? 'flex' : 'none';
+  btnPDF.disabled = btnJPG.disabled = $('btnPrint').disabled = receipts.length===0;
+  sbTotal.textContent = receipts.length ? totalStr : '-';
+}
+
+// ── Purpose ──
+function getPurpose() {
+  const v = purposeSel.value;
+  return v==='__custom__' ? (purposeCustom.value.trim()||'') : v;
+}
+
+// ── OCR 이미지 전처리 (인식률 향상 핵심) ──
+function preprocessForOCR(src) {
+  // 1. 해상도 보정: 작은 이미지는 2x 업스케일
+  const scale = src.width < 800 ? 2 : 1;
+  const W = src.width * scale, H = src.height * scale;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(src, 0, 0, W, H);
+  const imgData = ctx.getImageData(0, 0, W, H);
+  const d = imgData.data;
+
+  // 2. 그레이스케일 변환 + 대비 강화
+  const gray = new Uint8Array(W * H);
+  for (let i = 0; i < d.length; i += 4) {
+    let g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+    // 대비 강화 (1.5배)
+    g = ((g - 128) * 1.5) + 128;
+    g = g < 0 ? 0 : g > 255 ? 255 : g;
+    gray[i >> 2] = g;
+  }
+
+  // 3. Otsu 이진화: 히스토그램 기반 최적 threshold 자동 계산
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < gray.length; i++) hist[gray[i] | 0]++;
+  const total = gray.length;
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, wF = 0, maxVar = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (wB === 0) continue;
+    wF = total - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const variance = wB * wF * (mB - mF) * (mB - mF);
+    if (variance > maxVar) { maxVar = variance; threshold = t; }
+  }
+
+  // 4. 이진화 적용 (흰 배경 + 검은 글씨)
+  for (let i = 0; i < gray.length; i++) {
+    const v = gray[i] >= threshold ? 255 : 0;
+    const j = i * 4;
+    d[j] = d[j+1] = d[j+2] = v; d[j+3] = 255;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  console.log("[OCR전처리] 크기:", W+"x"+H, "scale:", scale, "Otsu threshold:", threshold);
+  return c;
+}
+
+// ── Crop ──
+function doCrop(src) {
+  const W=src.width,H=src.height;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const ctx=c.getContext('2d'); ctx.drawImage(src,0,0);
+  const d=ctx.getImageData(0,0,W,H).data;
+  let top=H,bot=0,lft=W,rgt=0; const T=238;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const i=(y*W+x)*4;
+    if(d[i+3]>15&&(d[i]<T||d[i+1]<T||d[i+2]<T)){if(y<top)top=y;if(y>bot)bot=y;if(x<lft)lft=x;if(x>rgt)rgt=x;}
+  }
+  if(top>=bot||lft>=rgt) return src;
+  const pad=Math.round(Math.min(W,H)*0.01);
+  top=Math.max(0,top-pad); bot=Math.min(H-1,bot+pad);
+  lft=Math.max(0,lft-pad); rgt=Math.min(W-1,rgt+pad);
+  const out=document.createElement('canvas'); out.width=rgt-lft; out.height=bot-top;
+  out.getContext('2d').drawImage(c,lft,top,out.width,out.height,0,0,out.width,out.height);
+  return out;
+}
+
+// ── Page Render ──
+const CW=792, CH=1120;
+
+function getCells(n) {
+  if(n===1) return [{x:0,y:0,w:1,h:1}];
+  if(n===2) return [{x:0,y:0,w:.5,h:1},{x:.5,y:0,w:.5,h:1}];
+  if(n===3) return [{x:0,y:0,w:.5,h:.5},{x:.5,y:0,w:.5,h:.5},{x:0,y:.5,w:1,h:.5}];
+  return [{x:0,y:0,w:.5,h:.5},{x:.5,y:0,w:.5,h:.5},{x:0,y:.5,w:.5,h:.5},{x:.5,y:.5,w:.5,h:.5}];
+}
+
+function drawAllPages() {
+  [...previewPanel.querySelectorAll('.page-wrap')].forEach(el=>el.remove());
+  updateStatusBar();
+  if(receipts.length===0){ emptyState.style.display='flex'; return; }
+  emptyState.style.display='none';
+  const pages=[];
+  for(let i=0;i<receipts.length;i+=perPage) pages.push(receipts.slice(i,i+perPage));
+  sbPages.textContent=pages.length;
+  pages.forEach((grp,pi)=>{
+    const wrap=document.createElement('div'); wrap.className='page-wrap';
+    const cv=document.createElement('canvas'); cv.width=CW; cv.height=CH;
+    wrap.appendChild(cv);
+    const num=document.createElement('div'); num.className='page-num';
+    num.textContent=`${pi+1} / ${pages.length} 페이지`;
+    wrap.appendChild(num);
+    previewPanel.appendChild(wrap);
+    renderPage(cv, grp, pi+1, pages.length);
+  });
+}
+
+function renderPage(canvas, group, pageIdx, totalPages) {
+  const W=canvas.width, H=canvas.height, s=W/792;
+  const ctx=canvas.getContext('2d');
+  const FB=`-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif`;
+  ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+
+  const mg     = Math.round(10*s);
+  const purpose= getPurpose();
+  const buyer  = buyerInput.value.trim();
+  const total  = receipts.reduce((a,r)=>a+r.amountNum,0);
+
+  // ── 공통 치수 ──
+  const hH = Math.round(H * 0.07); // 전체 문서의 7% (약 78px)
+  const hW = W-mg*2;
+  const accW = Math.round(5*s);
+  const r = Math.round(5*s);
+  const iX = mg+accW+Math.round(14*s);
+  const iR = mg+hW-Math.round(14*s);
+  const innerW = iR-iX;
+
+  // ── 박스 배경 ──
+  ctx.fillStyle='#f8fafc'; rrFill(ctx,mg,mg,hW,hH,r);
+  ctx.strokeStyle='#1e2740'; ctx.lineWidth=Math.max(1.5,2*s); rrStroke(ctx,mg,mg,hW,hH,r);
+  ctx.fillStyle='#1e2740'; rrFill(ctx,mg,mg,accW,hH,[r,0,0,r]);
+
+  ctx.textBaseline='middle';
+
+  // ── Y 좌표 (세로 2분할) ──
+  const r1y = mg + (hH * 0.28);
+  const d1y = mg + (hH * 0.55);
+  const r2y = mg + (hH * 0.78);
+
+  // ── Row 1 (상단) ──
+  const tFS = Math.round(20*s);
+  ctx.font=`bold ${tFS}px ${FB}`; ctx.fillStyle='#1e2740'; ctx.textAlign='left';
+  ctx.fillText('[지출 증빙]', iX, r1y);
+
+  const now=new Date();
+  const ds=`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  const dateFS = Math.round(17*s);
+  ctx.font=`bold ${dateFS}px ${FB}`; ctx.fillStyle='#334155'; ctx.textAlign='right';
+  ctx.fillText(ds, iR, r1y);
+
+  // Divider
+  ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=Math.max(1,s);
+  ctx.beginPath(); ctx.moveTo(mg,d1y); ctx.lineTo(mg+hW,d1y); ctx.stroke();
+
+  // ── Row 2 (하단) ──
+  const bFS = Math.round(16*s);
+  
+  // 1: 목적 (좌측)
+  ctx.textAlign='left';
+  if (purpose) {
+    ctx.fillStyle='#374151';
+    let pText = "목적: " + purpose;
+    let maxW = Math.round(innerW * 0.30); // 좌측 1/3 영역 내로 제한 (합계 침범 방지)
+    let currentFS = bFS;
+    let minFS = Math.round(8*s);
+    let lines = [];
+    
+    // 폰트 크기를 줄여가며 2줄 이내로 맞추기
+    while (currentFS >= minFS) {
+      ctx.font = `${currentFS}px ${FB}`;
+      lines = [];
+      let currentLine = "";
+      for (let i=0; i<pText.length; i++) {
+        let char = pText[i];
+        let testLine = currentLine + char;
+        if (ctx.measureText(testLine).width > maxW && currentLine.length > 0) {
+          lines.push(currentLine);
+          currentLine = char;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      lines.push(currentLine);
+      
+      if (lines.length <= 2) break; // 2줄 이내로 들어오면 통과
+      currentFS -= 1; // 2줄 넘어가면 폰트 사이즈 1씩 축소
+    }
+    
+    // 최소 폰트로도 2줄을 넘기면 강제 2줄 커트
+    if (lines.length > 2) {
+      lines = lines.slice(0, 2);
+      ctx.font = `${currentFS}px ${FB}`;
+      lines[1] = clipText(ctx, lines[1], maxW - ctx.measureText("...").width) + "...";
+    }
+    
+    ctx.font = `${currentFS}px ${FB}`;
+    if (lines.length === 1) {
+      ctx.fillText(lines[0], iX, r2y);
+    } else {
+      let lh = currentFS * 0.6;
+      ctx.fillText(lines[0], iX, r2y - lh);
+      ctx.fillText(lines[1], iX, r2y + lh);
+    }
+  } else {
+    ctx.font=`${bFS}px ${FB}`;
+    ctx.fillStyle='#c0ccd8';
+    ctx.fillText('목적: (입력 필요)', iX, r2y);
+  }
+
+  // 2: 합계 (중앙)
+  const totFS = Math.round(19*s);
+  ctx.font=`bold ${totFS}px ${FB}`;
+  ctx.textAlign='center';
+  const totStr = total>0 ? fmtAmt(total) : '인식 중…';
+  ctx.fillStyle = total>0 ? '#15803d' : '#94a3b8';
+  ctx.fillText(`합계: ${totStr}`, mg + hW / 2, r2y);
+
+  // 3: 구매자 & 서명 (우측)
+  ctx.textAlign='right';
+  ctx.font=`${bFS}px ${FB}`;
+  ctx.fillStyle='#1e2740';
+  const buyStr = buyer ? `구매자: ${buyer}` : '구매자: (이름)';
+  ctx.fillText(`${buyStr}     (서명)`, iR, r2y);
+
+  // ── Footer 설명 박스 ──
+  const fBoxH = Math.round(H * 0.045);
+  const footY = H - mg - fBoxH;
+  const fR = Math.round(4*s);
+
+  // 박스 배경 + 테두리
+  ctx.fillStyle='#f1f5f9'; rrFill(ctx, mg, footY, hW, fBoxH, fR);
+  ctx.strokeStyle='#cbd5e1'; ctx.lineWidth=Math.max(1,s); rrStroke(ctx, mg, footY, hW, fBoxH, fR);
+
+  // 좌측 accent bar
+  const fAccW = Math.round(4*s);
+  ctx.fillStyle='#94a3b8'; rrFill(ctx, mg, footY, fAccW, fBoxH, [fR,0,0,fR]);
+
+  const fPad = Math.round(10*s);
+  const fIX = mg + fAccW + fPad;
+  const fIR = mg + hW - fPad;
+  const fMidY = footY + fBoxH / 2;
+
+  // 좌측: 비고/설명 텍스트 (입력값 반영)
+  const footerText = ($('footerNote').value || '').trim();
+  const fFS = Math.round(10*s);
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#64748b';
+  if (footerText) {
+    const fMaxW = fIR - fIX - Math.round(60*s);
+    let fCurrentFS = fFS;
+    const fMinFS = Math.round(7*s);
+    while (fCurrentFS >= fMinFS) {
+      ctx.font = `${fCurrentFS}px ${FB}`;
+      if (ctx.measureText('※ ' + footerText).width <= fMaxW) break;
+      fCurrentFS -= 1;
+    }
+    ctx.font = `${fCurrentFS}px ${FB}`;
+    ctx.fillText(clipText(ctx, '※ ' + footerText, fMaxW), fIX, fMidY);
+  } else {
+    ctx.font = `${fFS}px ${FB}`;
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText('※ 꼬리말을 입력하세요', fIX, fMidY);
+  }
+
+  // 우측: 페이지 넘버링
+  if (pageIdx && totalPages) {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `bold ${fFS}px ${FB}`;
+    ctx.fillText(`${pageIdx} / ${totalPages}`, fIR, fMidY);
+  }
+
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+
+  // ── Receipt Grid ──
+  const imgTop=mg+hH+Math.round(14*s);
+  const imgH  =footY-imgTop-Math.round(14*s);
+  const imgW  =hW;
+  const cells =getCells(perPage);
+  const cPad  =Math.round(6*s);
+
+  group.forEach((rec,idx)=>{
+    if(!rec.croppedCanvas||rec.croppedCanvas.width===0) return;
+    if(idx>=cells.length) return;
+    const cell=cells[idx];
+    const cx=mg+cell.x*imgW;
+    const cy=imgTop+cell.y*imgH;
+    const cw=cell.w*imgW-(perPage>1?cPad:0);
+    const ch=cell.h*imgH-(perPage>1?cPad:0);
+
+    const iw=cw*(sizeRatio/100), ih=ch*(sizeRatio/100);
+    const asp=rec.croppedCanvas.width/rec.croppedCanvas.height;
+    let dw=iw,dh=dw/asp;
+    if(dh>ch){dh=ch;dw=dh*asp;}
+    if(dw>cw){dw=cw;dh=dw/asp;}
+    const dx=cx+(cw-dw)/2, dy=cy+(ch-dh)/2;
+
+    ctx.save();
+    ctx.shadowColor='rgba(0,0,0,0.12)'; ctx.shadowBlur=Math.round(12*s); ctx.shadowOffsetY=Math.round(3*s);
+    ctx.drawImage(rec.croppedCanvas,dx,dy,dw,dh);
+    ctx.restore();
+    ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=Math.max(1,s); ctx.strokeRect(dx,dy,dw,dh);
+
+    // Per-receipt amount tag (multi layout)
+    if(perPage>1 && rec.amount) {
+      const lfs=Math.round(10*s);
+      ctx.font=`bold ${lfs}px ${FB}`;
+      const lw=ctx.measureText(rec.amount).width+Math.round(12*s), lh=lfs+Math.round(7*s);
+      const lx=dx+dw-lw, ly=dy+dh-lh;
+      ctx.fillStyle='rgba(21,128,61,0.9)'; rrFill(ctx,lx,ly,lw,lh,Math.round(3*s));
+      ctx.fillStyle='#fff'; ctx.textAlign='center';
+      ctx.fillText(rec.amount,lx+lw/2,ly+Math.round(4*s));
+      ctx.textAlign='left';
+    }
+
+    // Per-receipt purpose tag (bottom-left of cell)
+    const recPurpose = getRecPurpose(rec);
+    if(recPurpose) {
+      const pfs=Math.round(perPage>1?9*s:11*s);
+      ctx.font=`${pfs}px ${FB}`;
+      const maxTagW = (perPage>1?cw:hW) * 0.55;
+      const tagLabel = clipText(ctx, recPurpose, maxTagW);
+      const tw=ctx.measureText(tagLabel).width+Math.round(12*s), th=pfs+Math.round(7*s);
+      const tx=dx, ty=dy+dh-th;
+      ctx.fillStyle='rgba(245,158,11,0.88)'; rrFill(ctx,tx,ty,tw,th,Math.round(3*s));
+      ctx.fillStyle='#1e2740'; ctx.textAlign='left';
+      ctx.fillText(tagLabel, tx+Math.round(6*s), ty+Math.round(4*s));
+    }
+
+    // Grid dividers
+    if(perPage>1) {
+      ctx.strokeStyle='#dde3eb'; ctx.lineWidth=Math.max(1,s);
+      ctx.setLineDash([Math.round(4*s),Math.round(4*s)]);
+      if(cell.x+cell.w<.99){const vx=cx+cw+cPad/2;ctx.beginPath();ctx.moveTo(vx,imgTop+8*s);ctx.lineTo(vx,footY-8*s);ctx.stroke();}
+      if(cell.y+cell.h<.99){const vy=cy+ch+cPad/2;ctx.beginPath();ctx.moveTo(mg+8*s,vy);ctx.lineTo(mg+imgW-8*s,vy);ctx.stroke();}
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+// ── Helpers ──
+function rrPath(ctx,x,y,w,h,r){
+  if(typeof r==='number')r=[r,r,r,r];
+  const[tl,tr,br,bl]=r.map(v=>Math.max(0,v));
+  ctx.beginPath();ctx.moveTo(x+tl,y);ctx.lineTo(x+w-tr,y);
+  if(tr>0)ctx.arcTo(x+w,y,x+w,y+tr,tr);else ctx.lineTo(x+w,y);
+  ctx.lineTo(x+w,y+h-br);
+  if(br>0)ctx.arcTo(x+w,y+h,x+w-br,y+h,br);else ctx.lineTo(x+w,y+h);
+  ctx.lineTo(x+bl,y+h);
+  if(bl>0)ctx.arcTo(x,y+h,x,y+h-bl,bl);else ctx.lineTo(x,y+h);
+  ctx.lineTo(x,y+tl);
+  if(tl>0)ctx.arcTo(x,y,x+tl,y,tl);else ctx.lineTo(x,y);
+  ctx.closePath();
+}
+function rrFill(ctx,x,y,w,h,r){rrPath(ctx,x,y,w,h,r);ctx.fill();}
+function rrStroke(ctx,x,y,w,h,r){rrPath(ctx,x,y,w,h,r);ctx.stroke();}
+function clipText(ctx,t,mw){if(ctx.measureText(t).width<=mw)return t;while(t.length>0&&ctx.measureText(t+'…').width>mw)t=t.slice(0,-1);return t+'…';}
+
+function updateStatusBar() {
+  sbCount.textContent=receipts.length;
+  sbPages.textContent=Math.ceil(receipts.length/perPage)||0;
+  setStatus(receipts.length?`영수증 ${receipts.length}장 로드됨`:'대기 중', receipts.length?'ok':'');
+}
+
+function setStatus(msg,type){
+  sbStatus.textContent=msg;
+  sbStatus.className=type==='ok'?'sb-ok':type==='err'?'sb-err':'';
+  sbDot.className='sbdot'+(type==='ok'?' ok':'');
+}
+
+function getFilename(ext){
+  const d=new Date();
+  const ds=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return `${(buyerInput.value.trim().replace(/\s+/g,'_')||'지출증빙')}_${ds}.${ext}`;
+}
+
+// ── Export ──
+function exportPDF() {
+  setStatus('PDF 생성 중…','');
+  const pages=[]; for(let i=0;i<receipts.length;i+=perPage) pages.push(receipts.slice(i,i+perPage));
+  setTimeout(()=>{
+    try{
+      const {jsPDF}=window.jspdf;
+      const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+      pages.forEach((grp,pi)=>{
+        const hc=document.createElement('canvas'); hc.width=1240; hc.height=1754;
+        renderPage(hc,grp,pi+1,pages.length);
+        if(pi>0) pdf.addPage();
+        pdf.addImage(hc.toDataURL('image/jpeg',.95),'JPEG',0,0,210,297);
+      });
+      const fname=getFilename('pdf'); pdf.save(fname); setStatus(`PDF ${pages.length}페이지 저장됨`,'ok');
+    }catch(e){setStatus('PDF 오류: '+e.message,'err');}
+  },80);
+}
+
+function exportJPG() {
+  setStatus('JPG 생성 중…','');
+  setTimeout(()=>{
+    try{
+      const total=Math.ceil(receipts.length/perPage);
+      const hc=document.createElement('canvas'); hc.width=1240; hc.height=1754;
+      renderPage(hc,receipts.slice(0,perPage),1,total);
+      const link=document.createElement('a'); link.download=getFilename('jpg');
+      link.href=hc.toDataURL('image/jpeg',.95); link.click();
+      setStatus('JPG 저장됨 (1페이지)','ok');
+    }catch(e){setStatus('JPG 오류: '+e.message,'err');}
+  },50);
+}
+
+// ── Print ──
+function printPages() {
+  const pages=[]; for(let i=0;i<receipts.length;i+=perPage) pages.push(receipts.slice(i,i+perPage));
+  const total=pages.length;
+
+  // Build print-only iframes with one A4 canvas per page
+  const printWin = window.open('','_blank','width=900,height=700');
+  printWin.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>지출증빙 인쇄</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#fff}
+    .page{width:210mm;height:297mm;page-break-after:always;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .page:last-child{page-break-after:avoid}
+    img{width:210mm;height:297mm;display:block}
+    @media print{@page{size:A4;margin:0}body{margin:0}}
+  </style></head><body>`);
+
+  pages.forEach((grp, pi) => {
+    const hc = document.createElement('canvas'); hc.width=1240; hc.height=1754;
+    renderPage(hc, grp, pi+1, total);
+    const dataUrl = hc.toDataURL('image/jpeg', 0.97);
+    printWin.document.write(`<div class="page"><img src="${dataUrl}"></div>`);
+  });
+
+  printWin.document.write('</body></html>');
+  printWin.document.close();
+  printWin.onload = () => { printWin.focus(); printWin.print(); };
+  setStatus(`인쇄 창 열림 (${total}페이지)`, 'ok');
+}
+
+// ── Modal ──
+const thumbMap={};
+function openModal(id){ const rec=receipts.find(r=>r.id===+id); if(!rec)return; $('modalImg').src=rec.origDataUrl; $('imgModal').classList.add('open'); }
+function closeModal(){ $('imgModal').classList.remove('open'); }
+
+// ── Zoom ──
+function applyZoom(val) {
+  document.documentElement.style.setProperty('--zoom', val / 100);
+  document.getElementById('zoomValUI').textContent = val + '%';
+  document.getElementById('zoomSliderUI').value = val;
+}
+function fitZoom() {
+  const panel = document.getElementById('previewPanel');
+  const availableH = panel.clientHeight - 80;
+  let z = (availableH / 1120) * 100;
+  z = Math.max(10, Math.min(150, z)); // clamp 10~150
+  applyZoom(Math.round(z));
+}
+window.addEventListener('resize', fitZoom);
+window.addEventListener('load', fitZoom);
+setTimeout(fitZoom, 100);
+
+drawAllPages();
+
+</script>
+</body>
+</html>

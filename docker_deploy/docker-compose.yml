@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  receipt-sync-app:
+    build: .
+    container_name: receipt-sync-app
+    ports:
+      - "8000:8000"
+    restart: always
+    volumes:
+      - ./index.html:/app/index.html
+      - ./mobile.html:/app/mobile.html
+      - ./server.py:/app/server.py
+    environment:
+      - TZ=Asia/Seoul
