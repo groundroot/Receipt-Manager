@@ -169,7 +169,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
 <header>
   <div class="hdr-logo">📄</div>
   <span class="hdr-title">영수증매니저</span>
-  <span class="hdr-sub">Receipt Manager <span style="margin-left:8px; font-family:var(--mono); color:var(--accent); font-size:10px;">v1.1.8</span></span>
+  <span class="hdr-sub">Receipt Manager <span style="margin-left:8px; font-family:var(--mono); color:var(--accent); font-size:10px;">v1.2.1</span></span>
   <button class="hdr-badge" style="cursor:pointer; background:var(--accent); color:var(--dark); font-weight:bold; border:none;" onclick="window.open('mailto:christvictory@gmail.com?subject=영수증매니저 개선 피드백&body=앱 기능 향상을 위한 피드백을 적어주세요.')">💡 앱 기능 향상 피드백</button>
 </header>
 
@@ -223,6 +223,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
     <div class="field">
       <label>구매자</label>
       <input type="text" id="buyerInput" placeholder="예) 홍길동 간사">
+    </div>
+    <div class="field">
+      <label>증빙 날짜</label>
+      <input type="date" id="docDateInput">
     </div>
     <div class="field">
       <label>꼬리말 · 비고</label>
@@ -320,6 +324,7 @@ const purposeSel   = $('purposeSel');
 const customField  = $('customField');
 const purposeCustom= $('purposeCustom');
 const buyerInput   = $('buyerInput');
+const docDateInput = $('docDateInput');
 const sizeSlider   = $('sizeSlider');
 const sliderVal    = $('sliderVal');
 const cropTog      = $('cropTog');
@@ -347,6 +352,7 @@ previewPanel.addEventListener('drop', e=>{ e.preventDefault(); previewPanel.styl
 purposeSel.addEventListener('change', ()=>{ onPurposeSel(); drawAllPages(); });
 purposeCustom.addEventListener('input', drawAllPages);
 buyerInput.addEventListener('input', drawAllPages);
+docDateInput.addEventListener('change', drawAllPages);
 $('footerNote').addEventListener('input', drawAllPages);
 sizeSlider.addEventListener('input', ()=>{ sizeRatio=+sizeSlider.value; sliderVal.textContent=sizeRatio+'%'; drawAllPages(); });
 
@@ -616,7 +622,7 @@ async function extractAmountFor(rec) {
     const imgW = ocrCanvas.width, imgH = ocrCanvas.height;
     const wordData = [];  // {text, x, y, x2, y2, centerX, centerY, isNum, numVal, isKw, kwPriority}
 
-    const highKw = /^(합계|총액|결제금?액?|청구금?액?|총합|합산|받을금액|총결제|승인금?액?|거래금?액?|판매금?액?|일시불|total|grand|amount|balance)$/i;
+    const highKw = /^(합계|총액|결제금?액?|청구금?액?|총합|합산|받을금액|총결제|승인금?액?|거래금?액?|판매금?액?|일시불|최종결제|납부금액|지불금액|실결제액|결제하실금액|내실금액|최종금액|총지불|실지불|total|grand|amount|balance|pay)$/i;
     const lowKw = /^(카드결제|신용승인|소계|수납|매출|payment|charge|subtotal|net|gross|due)$/i;
     const wonKw = /원|₩|KRW/i;
     const dollarRe = /(?:US\s*\$|USD|\$)\s*(\d{1,3}(?:[,.]\d{1,3})*(?:\.\d{1,2})?)|(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:\$|USD)/i;
@@ -715,6 +721,13 @@ async function extractAmountFor(rec) {
       else if (lowKw.test(noSpaceLine)) lineKwPriority = 2;
       else if (wonKw.test(lineText)) lineKwPriority = 1;
 
+      // 사업자등록번호 라인은 금액 라인이 아님
+      if (/\d{3}[-./]\d{2}[-./]\d{5}/.test(lineText) && lineKwPriority === 0) continue;
+
+      // 단가/수량 라인 판별 — 항목 금액 패널티
+      const itemKw = /단가|단위|수량|수\s*량|unit\s*price|unit|qty|quantity|ea\b|개당|per\b/i;
+      const isItemLine = itemKw.test(lineText);
+
       // 라인의 텍스트에서 숫자 추출 (safeText 변환 적용)
       let safeLine = lineText;
       // 달러 패턴 제거
@@ -724,14 +737,21 @@ async function extractAmountFor(rec) {
       safeLine = safeLine.replace(/(\d) {1,3}(?=\d)/g, '$1');
       // 8자리 이상 제거
       safeLine = safeLine.replace(/\b\d{8,}\b/g, ' ');
+      // 사업자등록번호 제거 (000-00-00000 또는 000.00.00000)
+      safeLine = safeLine.replace(/\b\d{3}[-./]\d{2}[-./]\d{5}\b/g, ' ');
+      // 카드번호 제거 (xxxx-xxxx-xxxx-xxxx 또는 마스킹 형태)
+      safeLine = safeLine.replace(/\b\d{4}[-\s][\d*]{4}[-\s][\d*]{4}[-\s][\d*]{4}\b/g, ' ');
 
       const numMatches = [...safeLine.matchAll(/(\d{1,3}(?:[,.]\d{3})+|\d+)/g)];
 
       for (const nm of numMatches) {
         const val = parseInt(nm[1].replace(/[,.]/g, ''), 10);
-        if (val <= 10 || val > 50000000) continue;
+        if (val <= 10 || val > 200000000) continue;
 
         let score = 0;
+
+        // 항목 단가/수량 라인 패널티
+        if (isItemLine) score -= 50;
 
         // 키워드 근접도 (같은 라인)
         if (lineKwPriority === 3) score += 100;
@@ -770,14 +790,34 @@ async function extractAmountFor(rec) {
         if (/\d{1,3}([,.]\d{3})+/.test(nm[1])) score += 15;
 
         // 금액 크기 합리성
-        if (val >= 100 && val <= 50000000) score += 10;
+        if (val >= 100 && val <= 200000000) score += 10;
 
         candidates.push({ val, score, source: lineKwPriority > 0 ? 'keyword' : 'spatial', lineText: lineText.substring(0, 40) });
       }
     }
 
-    // 점수 내림차순 정렬
-    candidates.sort((a, b) => b.score - a.score);
+    // 점수 내림차순 정렬, 동점일 때 큰 금액 우선
+    candidates.sort((a, b) => b.score - a.score || b.val - a.val);
+
+    // ── 합계 검증 보너스: 다른 금액들의 합과 근접한 값 = 총액 ──
+    const topN = candidates.slice(0, Math.min(10, candidates.length));
+    if (topN.length >= 3) {
+      const vals = topN.map(c => c.val);
+      for (let i = 0; i < topN.length; i++) {
+        const target = topN[i].val;
+        // target보다 작은 값들의 합계
+        const smaller = vals.filter(v => v < target * 0.95);
+        if (smaller.length >= 2) {
+          const subSum = smaller.reduce((a, b) => a + b, 0);
+          const ratio = Math.abs(subSum - target) / target;
+          if (ratio < 0.1) {  // 10% 이내면 합계로 간주
+            candidates[i].score += 50;
+          }
+        }
+      }
+      // 재정렬
+      candidates.sort((a, b) => b.score - a.score || b.val - a.val);
+    }
 
     // 상위 5개 후보 로깅
     console.log("[CLOVA식] 금액 후보 TOP5:");
@@ -797,14 +837,14 @@ async function extractAmountFor(rec) {
       safeText = safeText.replace(/\b\d{2,3}[-.]\d{3,4}[-.]\d{4}\b/g, ' ');
       safeText = safeText.replace(/\b\d{8,}\b/g, ' ');
       const fLines = safeText.split(/\n/);
-      const fHighKw = /(?:합\s*계|총\s*액|결\s*제\s*금?\s*액?|청\s*구\s*금?\s*액?|총\s*결\s*제|승\s*인\s*금?\s*액?|total|grand|balance)/i;
+      const fHighKw = /(?:합\s*계|총\s*액|최\s*종\s*결\s*제|납\s*부\s*금\s*액|지\s*불\s*금\s*액|실\s*결\s*제\s*액|결\s*제\s*금?\s*액?|청\s*구\s*금?\s*액?|총\s*결\s*제|승\s*인\s*금?\s*액?|총\s*지\s*불|실\s*지\s*불|total|grand|balance|pay)/i;
       for (let li = fLines.length - 1; li >= 0; li--) {
         if (fHighKw.test(fLines[li])) {
           const nums = fLines[li].match(/\d{1,3}([,.]\d{3})+|\d+/g);
           if (nums) {
             for (const n of nums) {
               const v = parseInt(n.replace(/[,.]/g,''), 10);
-              if (v > 10 && v <= 50000000) candidates.push({ val: v, score: 50, source: 'textFallback', lineText: fLines[li].substring(0,40) });
+              if (v > 10 && v <= 200000000) candidates.push({ val: v, score: 50, source: 'textFallback', lineText: fLines[li].substring(0,40) });
             }
           }
         }
@@ -815,7 +855,7 @@ async function extractAmountFor(rec) {
         if (allNums) {
           for (const n of allNums) {
             const v = parseInt(n.replace(/[,.]/g,''), 10);
-            if (v > 10 && v <= 50000000) candidates.push({ val: v, score: 1, source: 'maxFallback', lineText: '' });
+            if (v > 10 && v <= 200000000) candidates.push({ val: v, score: 1, source: 'maxFallback', lineText: '' });
           }
         }
       }
@@ -847,7 +887,12 @@ async function extractAmountFor(rec) {
     else if(text.match(/문구|사무|용품|알파/)) { itemType = "제품"; title = "소모품"; category = "사무용품 구매"; }
     
     rec.date = date; rec.itemType = itemType; rec.title = title;
-    
+
+    // 첫 번째 영수증의 날짜를 증빙 날짜에 자동 입력 (날짜가 비어있을 때만)
+    if (!docDateInput.value && date !== '미상') {
+      docDateInput.value = date; // YYYY-MM-DD 형식
+    }
+
     if (category !== "기타") {
       rec.purpose = category;
       const sel = $('recSel_' + rec.id);
@@ -926,7 +971,7 @@ function getPurpose() {
 // ── OCR 이미지 전처리 (인식률 향상 핵심) ──
 function preprocessForOCR(src) {
   // 1. 해상도 보정: 작은 이미지는 2x 업스케일
-  const scale = src.width < 800 ? 2 : 1;
+  const scale = src.width < 1200 ? 2 : 1;
   const W = src.width * scale, H = src.height * scale;
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const ctx = c.getContext('2d');
@@ -934,17 +979,43 @@ function preprocessForOCR(src) {
   const imgData = ctx.getImageData(0, 0, W, H);
   const d = imgData.data;
 
-  // 2. 그레이스케일 변환 + 대비 강화
+  // 2. 그레이스케일 변환 + 동적 대비 강화
+  // 패스 1: 평균/분산 계산
+  let gsum = 0;
+  const gtemp = new Uint8Array(W * H);
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+    gtemp[i >> 2] = g;
+    gsum += g;
+  }
+  const gmean = gsum / (W * H);
+  let gvar = 0;
+  for (let i = 0; i < gtemp.length; i++) gvar += (gtemp[i] - gmean) ** 2;
+  const gstd = Math.sqrt(gvar / gtemp.length);
+  const contrastFactor = gstd < 30 ? 2.5 : gstd < 60 ? 1.8 : 1.3;
+
+  // 패스 2: 대비 강화
   const gray = new Uint8Array(W * H);
   for (let i = 0; i < d.length; i += 4) {
-    let g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    // 대비 강화 (1.5배)
-    g = ((g - 128) * 1.5) + 128;
+    let g = gtemp[i >> 2];
+    g = ((g - 128) * contrastFactor) + 128;
     g = g < 0 ? 0 : g > 255 ? 255 : g;
     gray[i >> 2] = g;
   }
 
-  // 3. Otsu 이진화: 히스토그램 기반 최적 threshold 자동 계산
+  // 3. 샤프닝 필터 (라플라시안 언샤프 마스킹)
+  const sharpened = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x;
+      if (x === 0 || x === W-1 || y === 0 || y === H-1) { sharpened[idx] = gray[idx]; continue; }
+      const val = 5*gray[idx] - gray[(y-1)*W+x] - gray[(y+1)*W+x] - gray[y*W+(x-1)] - gray[y*W+(x+1)];
+      sharpened[idx] = Math.max(0, Math.min(255, val));
+    }
+  }
+  for (let i = 0; i < gray.length; i++) gray[i] = sharpened[i];
+
+  // 4. Otsu 이진화: 히스토그램 기반 최적 threshold 자동 계산
   const hist = new Array(256).fill(0);
   for (let i = 0; i < gray.length; i++) hist[gray[i] | 0]++;
   const total = gray.length;
@@ -966,7 +1037,7 @@ function preprocessForOCR(src) {
     d[j] = d[j+1] = d[j+2] = v; d[j+3] = 255;
   }
   ctx.putImageData(imgData, 0, 0);
-  console.log("[OCR전처리] 크기:", W+"x"+H, "scale:", scale, "Otsu threshold:", threshold);
+  console.log("[OCR전처리] 크기:", W+"x"+H, "scale:", scale, "std:", gstd.toFixed(1), "대비배율:", contrastFactor, "Otsu threshold:", threshold);
   return c;
 }
 
@@ -1053,36 +1124,37 @@ function renderPage(canvas, group, pageIdx, totalPages) {
   const r2y = mg + (hH * 0.78);
 
   // ── Row 1 (상단) ──
-  const tFS = Math.round(20*s);
-  ctx.font=`bold ${tFS}px ${FB}`; ctx.fillStyle='#1e2740'; ctx.textAlign='left';
-  ctx.fillText('[지출 증빙]', iX, r1y);
-
-  const now=new Date();
-  const ds=`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  let ds = '';
+  if (docDateInput.value) {
+    // 사용자가 입력한 날짜 우선 사용 (YYYY-MM-DD 형식을 YYYY.MM.DD로 변환)
+    ds = docDateInput.value.replace(/-/g, '.');
+  } else if (group && group.length > 0 && group[0].date && group[0].date !== '미상') {
+    // 첫 번째 영수증의 날짜 사용 (YYYY-MM-DD 형식을 YYYY.MM.DD로 변환)
+    ds = group[0].date.replace(/-/g, '.');
+  } else {
+    // 영수증 날짜가 없으면 오늘 날짜 사용
+    const now=new Date();
+    ds=`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+  }
   const dateFS = Math.round(17*s);
   ctx.font=`bold ${dateFS}px ${FB}`; ctx.fillStyle='#334155'; ctx.textAlign='right';
   ctx.fillText(ds, iR, r1y);
 
-  // Divider
-  ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=Math.max(1,s);
-  ctx.beginPath(); ctx.moveTo(mg,d1y); ctx.lineTo(mg+hW,d1y); ctx.stroke();
-
-  // ── Row 2 (하단) ──
-  const bFS = Math.round(16*s);
-  
-  // 1: 목적 (좌측)
+  // 목적 (좌측) - Row 1에 메인 타이틀처럼 표시
   ctx.textAlign='left';
+  const pFS = Math.round(24*s); // 메인 타이틀 크기로 설정
+
   if (purpose) {
     ctx.fillStyle='#374151';
-    let pText = "목적: " + purpose;
-    let maxW = Math.round(innerW * 0.30); // 좌측 1/3 영역 내로 제한 (합계 침범 방지)
-    let currentFS = bFS;
-    let minFS = Math.round(8*s);
+    let pText = purpose;
+    let maxW = Math.round(innerW * 0.55); // 날짜 영역을 피하면서 충분한 너비 확보
+    let currentFS = pFS;
+    let minFS = Math.round(12*s);
     let lines = [];
-    
+
     // 폰트 크기를 줄여가며 2줄 이내로 맞추기
     while (currentFS >= minFS) {
-      ctx.font = `${currentFS}px ${FB}`;
+      ctx.font = `bold ${currentFS}px ${FB}`;
       lines = [];
       let currentLine = "";
       for (let i=0; i<pText.length; i++) {
@@ -1096,31 +1168,38 @@ function renderPage(canvas, group, pageIdx, totalPages) {
         }
       }
       lines.push(currentLine);
-      
-      if (lines.length <= 2) break; // 2줄 이내로 들어오면 통과
-      currentFS -= 1; // 2줄 넘어가면 폰트 사이즈 1씩 축소
+
+      if (lines.length <= 2) break;
+      currentFS -= 1;
     }
-    
+
     // 최소 폰트로도 2줄을 넘기면 강제 2줄 커트
     if (lines.length > 2) {
       lines = lines.slice(0, 2);
-      ctx.font = `${currentFS}px ${FB}`;
+      ctx.font = `bold ${currentFS}px ${FB}`;
       lines[1] = clipText(ctx, lines[1], maxW - ctx.measureText("...").width) + "...";
     }
-    
-    ctx.font = `${currentFS}px ${FB}`;
+
+    ctx.font = `bold ${currentFS}px ${FB}`;
     if (lines.length === 1) {
-      ctx.fillText(lines[0], iX, r2y);
+      ctx.fillText(lines[0], iX, r1y);
     } else {
       let lh = currentFS * 0.6;
-      ctx.fillText(lines[0], iX, r2y - lh);
-      ctx.fillText(lines[1], iX, r2y + lh);
+      ctx.fillText(lines[0], iX, r1y - lh);
+      ctx.fillText(lines[1], iX, r1y + lh);
     }
   } else {
-    ctx.font=`${bFS}px ${FB}`;
+    ctx.font=`bold ${pFS}px ${FB}`;
     ctx.fillStyle='#c0ccd8';
-    ctx.fillText('목적: (입력 필요)', iX, r2y);
+    ctx.fillText('(목적 입력 필요)', iX, r1y);
   }
+
+  // Divider
+  ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=Math.max(1,s);
+  ctx.beginPath(); ctx.moveTo(mg,d1y); ctx.lineTo(mg+hW,d1y); ctx.stroke();
+
+  // ── Row 2 (하단) ──
+  const bFS = Math.round(17*s);
 
   // 2: 합계 (중앙)
   const totFS = Math.round(19*s);
